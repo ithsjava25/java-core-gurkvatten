@@ -29,7 +29,7 @@ public abstract class Product {
     public BigDecimal price() {
         return price;
     }
-    public void setPrice(BigDecimal newPrice) {
+    public void price(BigDecimal newPrice) {
         setPrice(newPrice);
     }
 
