@@ -172,6 +172,19 @@ class WarehouseAnalyzer {
         return interpolatedValue.setScale(2, RoundingMode.HALF_UP);
     }
 
+    /**
+     * Identifies products whose price is considered a statistical outlier using the
+     * Interquartile Range (IQR) method (Tukey's Fences).
+     * * An outlier is defined as any price that falls outside the range:
+     * [Q1 - (IQR * multiplier), Q3 + (IQR * multiplier)].
+     * This method is robust against extreme values that can skew mean-based calculations.
+     * Test expectation: In the provided test scenario, using a multiplier of 1.5
+     * correctly identifies both the extremely high and extremely low price points
+     * as outliers.
+     * * @param iqrMultiplier The multiplier used to define the fences (e.g., 1.5 for standard outlier detection).
+     * @return A list of products whose prices lie outside the calculated fences.
+     */
+
     public List<Product> findPriceOutliers(double iqrMultiplier) {
         List<Product> products = warehouse.getProducts();
         if (products.isEmpty()) {
