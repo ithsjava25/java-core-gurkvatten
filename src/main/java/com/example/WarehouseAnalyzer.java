@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.math.MathContext;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -142,27 +143,67 @@ class WarehouseAnalyzer {
      * number of standard deviations. Uses population standard deviation over all products.
      * Test expectation: with a mostly tight cluster and two extremes, calling with 2.0 returns the two extremes.
      *
-     * @param standardDeviations threshold in standard deviations (e.g., 2.0)
+     *
      * @return list of products considered outliers
      */
-    public List<Product> findPriceOutliers(double standardDeviations) {
-        List<Product> products = warehouse.getProducts();
-        int n = products.size();
-        if (n == 0) return List.of();
-        double sum = products.stream().map(Product::price).mapToDouble(bd -> bd.doubleValue()).sum();
-        double mean = sum / n;
-        double variance = products.stream()
-                .map(Product::price)
-                .mapToDouble(bd -> Math.pow(bd.doubleValue() - mean, 2))
-                .sum() / n;
-        double std = Math.sqrt(variance);
-        double threshold = standardDeviations * std;
-        List<Product> outliers = new ArrayList<>();
-        for (Product p : products) {
-            double diff = Math.abs(p.price().doubleValue() - mean);
-            if (diff > threshold) outliers.add(p);
+    private BigDecimal getQuartile(List<BigDecimal> sortedPrices, double position) {
+        if (sortedPrices.isEmpty()) {
+            return BigDecimal.ZERO;
         }
-        return outliers;
+        int n = sortedPrices.size();
+        double index = (n - 1) * position;
+        int lowerIndex = (int) Math.floor(index);
+        double fraction = index - lowerIndex;
+
+        if (fraction == 0) {
+            return sortedPrices.get(lowerIndex);
+        }
+
+        if (lowerIndex >= n - 1) {
+            return sortedPrices.get(n - 1);
+        }
+
+        BigDecimal lowerValue = sortedPrices.get(lowerIndex);
+        BigDecimal upperValue = sortedPrices.get(lowerIndex + 1);
+
+        BigDecimal diff = upperValue.subtract(lowerValue);
+        BigDecimal interpolatedValue = lowerValue.add(diff.multiply(BigDecimal.valueOf(fraction)));
+
+        return interpolatedValue.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Identifies products whose price is considered a statistical outlier using the
+     * Interquartile Range (IQR) method (Tukey's Fences).
+     * * An outlier is defined as any price that falls outside the range:
+     * [Q1 - (IQR * multiplier), Q3 + (IQR * multiplier)].
+     * This method is robust against extreme values that can skew mean-based calculations.
+     * Test expectation: In the provided test scenario, using a multiplier of 1.5
+     * correctly identifies both the extremely high and extremely low price points
+     * as outliers.
+     * * @param iqrMultiplier The multiplier used to define the fences (e.g., 1.5 for standard outlier detection).
+     * @return A list of products whose prices lie outside the calculated fences.
+     */
+
+    public List<Product> findPriceOutliers(double iqrMultiplier) {
+        List<Product> products = warehouse.getProducts();
+        if (products.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<BigDecimal> prices = products.stream()
+                .map(Product::price)
+                .sorted()
+                .collect(Collectors.toList());
+        BigDecimal q1 = getQuartile(prices, 0.25);
+        BigDecimal q3 = getQuartile(prices, 0.75);
+        BigDecimal iqr = q3.subtract(q1);
+        BigDecimal multiplier = BigDecimal.valueOf(iqrMultiplier);
+        BigDecimal step = iqr.multiply(multiplier);
+        BigDecimal lowerFence = q1.subtract(step);
+        BigDecimal upperFence = q3.add(step);
+        return products.stream()
+                .filter(p -> p.price().compareTo(lowerFence) < 0 || p.price().compareTo(upperFence) > 0)
+                .collect(Collectors.toList());
     }
     
     /**
@@ -221,7 +262,7 @@ class WarehouseAnalyzer {
             BigDecimal discounted = p.price();
             if (p instanceof Perishable per) {
                 LocalDate exp = per.expirationDate();
-                long daysBetween = java.time.temporal.ChronoUnit.DAYS.between(today, exp);
+                long daysBetween = ChronoUnit.DAYS.between(today, exp);
                 if (daysBetween == 0) {
                     discounted = p.price().multiply(new BigDecimal("0.50"));
                 } else if (daysBetween == 1) {
@@ -368,4 +409,5 @@ class InventoryStatistics {
     public int getCategoryCount() { return categoryCount; }
     public Product getMostExpensiveProduct() { return mostExpensiveProduct; }
     public Product getCheapestProduct() { return cheapestProduct; }
+
 }
